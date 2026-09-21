@@ -1,21 +1,78 @@
-MIT License
+FOXASH PROPRIETARY SOFTWARE LICENSE AGREEMENT
 
-Copyright (c) 2026 FlameFirelife
+Copyright © 2026 FlameDev Studios. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. SOFTWARE
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This agreement applies to the Foxash interpreter, including its compiled
+binaries, documentation, and related materials.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. LICENSE GRANT
+
+FlameDev Studios grants you a limited, non-exclusive, non-transferable,
+non-sublicensable license to install and use the official compiled Foxash
+interpreter for lawful purposes.
+
+3. RESTRICTIONS
+
+You may not, without prior written permission from FlameDev Studios:
+
+- Copy or redistribute the Foxash interpreter;
+- Modify, adapt, or create derivative versions of the interpreter;
+- Reverse-engineer, decompile, disassemble, or attempt to obtain its source code;
+- Sell, rent, lease, sublicense, or distribute the interpreter;
+- Embed the interpreter in another product or service;
+- Remove copyright, trademark, or licensing notices.
+
+4. OWNERSHIP
+
+Foxash, including its source code, compiled interpreter, design, and
+documentation, remains the property of FlameDev Studios.
+
+This agreement grants you permission to use Foxash but does not transfer
+ownership of Foxash or its source code to you.
+
+5. USER-CREATED PROGRAMS
+
+You retain ownership of programs and other original content that you create
+using Foxash.
+
+This clause does not grant you ownership of Foxash itself or of third-party
+libraries, code, images, sounds, or other materials included in your programs.
+
+6. THIRD-PARTY COMPONENTS
+
+Foxash may include third-party software subject to separate license terms.
+Those terms remain applicable to the relevant components.
+
+7. DISCLAIMER OF WARRANTY
+
+Foxash is provided “AS IS” and “AS AVAILABLE,” without warranties of any kind,
+to the maximum extent permitted by applicable law.
+
+8. LIMITATION OF LIABILITY
+
+To the maximum extent permitted by law, FlameDev Studios will not be liable
+for indirect, incidental, special, consequential, or loss-of-data damages
+arising from the use of or inability to use Foxash.
+
+9. TERMINATION
+
+This license automatically terminates if you violate its terms. Upon
+termination, you must stop using Foxash and delete all copies in your
+possession or control.
+
+10. CONTACT
+
+For licensing inquiries, contact:
+
+FlameDev Studios
+Gmail: flamedevjourney@gmail.com
+
+
+11. GOVERNING LAW
+
+This agreement is governed by the laws of Italy, without
+regard to conflict-of-law principles.
+
+By installing, downloading, or using Foxash, you agree to this license.
