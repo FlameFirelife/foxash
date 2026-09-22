@@ -1,0 +1,12 @@
+[package]
+name = "foxash"
+version = "1.2.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
