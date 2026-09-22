@@ -45,6 +45,5 @@ Foxash is closed-source software. The source code is not included in this reposi
 
 ## License
 
-Foxash is proprietary software owned by FlameDev Studios.
+Foxash has an MIT License.
 
-Use of Foxash is governed by the terms in the license. All rights are reserved unless permission is granted under that license.
