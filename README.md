@@ -41,7 +41,7 @@ For information about Foxash syntax, commands, and programming features, see the
 
 ## Repository
 This repository contains official Foxash releases, documentation, branding, and related project resources.
-Foxash is closed-source software. The source code is not included in this repository.
+Foxash is open-source software. The source code is in this repository.
 
 ## License
 
