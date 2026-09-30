@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./foxash.svg" alt="Foxash logo" width="180">
+  <img src="./foxash-logo.svg" alt="Foxash logo" width="180">
 </p>
 
 <h1 align="center">Foxash</h1>
@@ -11,7 +11,9 @@
 ---
 
 ## What is Foxash?
-
+<p align="center">
+  <img src="./foxash.svg" alt="Foxash logo" width="180">
+</p>
 Foxash is a small, beginner-friendly programming language created to make programming feel approachable from the start.
 
 It is designed for people who are new to programming and for anyone who wants a simple, readable language without unnecessary complexity. Foxash is focused on making the first steps into programming feel clear, direct, and enjoyable.
