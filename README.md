@@ -2,8 +2,6 @@
   <img src="./foxash-logo.svg" alt="Foxash logo" width="180">
 </p>
 
-<h1 align="center">Foxash</h1>
-
 <p align="center">
   One of the easiest programming languages to learn.
 </p>
