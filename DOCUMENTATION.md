@@ -115,6 +115,7 @@ Foxash supports:
 - Numbers
 - Booleans
 - Lists
+- JSON objects (when read from a file)
 - `nothing`
 
 ## Text
@@ -193,12 +194,29 @@ Hello, Flame!
 
 ---
 
-## Saving Lists
-Lists can be saved as JSON files by using:
+## Reading and saving JSON
+Foxash can save and read JSON values, including lists and objects. Save a value:
 ```foxash
-save list_name to "file_name.json"
+define inventory = ["sword", "potion"]
+save inventory to "inventory.json"
 ```
- For now, this isn't really usefull due to the inability to read them.
+
+Read a JSON file into a new variable:
+```foxash
+read "inventory.json" into inventory
+write(inventory[1])
+```
+
+JSON objects can be read and accessed with text keys. List indexes remain one-based:
+```foxash
+read "settings.json" into settings
+write(settings["theme"])
+write(settings["window"]["width"])
+```
+
+JSON arrays become Foxash lists, objects become JSON objects, strings become text, numbers stay numbers, booleans stay booleans, and `null` becomes `nothing`. `save` writes Foxash values back as valid JSON.
+
+Paths are relative to the directory where the Foxash program is run.
 
 ---
 
@@ -843,6 +861,18 @@ Show the Foxash version:
 foxash version
 ```
 
+## VS Code extension
+
+Foxash includes a VS Code extension in [`vscode-foxash`](vscode-foxash). Install the packaged extension with:
+
+```text
+code --install-extension vscode-foxash/foxash-0.1.0.vsix
+```
+
+On Windows, run [`release_extension.bat`](release_extension.bat) to rebuild the VSIX package from the extension sources.
+
+The extension adds Foxash syntax highlighting, snippets, bracket matching, and **Foxash: Run File** / **Foxash: Check File** commands. Set `foxash.executablePath` in VS Code settings if the Foxash executable is not on your `PATH`.
+
 ---
 
 # Errors
@@ -870,6 +900,6 @@ Errors include the file location when it is available.
 
 # Version
 
-This documentation describes **Foxash v1.2.0**.
+This documentation describes **Foxash v1.2.5**.
 
 Created by **FlameDev Studios**.

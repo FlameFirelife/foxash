@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -6,6 +7,7 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     List(Vec<Value>),
+    Object(BTreeMap<String, Value>),
     Nothing,
 }
 
@@ -36,6 +38,20 @@ impl fmt::Display for Value {
                 }
 
                 write!(formatter, "]")
+            }
+
+            Value::Object(values) => {
+                write!(formatter, "{{")?;
+
+                for (index, (key, value)) in values.iter().enumerate() {
+                    if index > 0 {
+                        write!(formatter, ", ")?;
+                    }
+
+                    write!(formatter, "{}: {}", crate::json::quote(key), value)?;
+                }
+
+                write!(formatter, "}}")
             }
 
             Value::Nothing => write!(formatter, "nothing"),

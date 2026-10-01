@@ -114,6 +114,11 @@ pub enum Statement {
         path: Expr,
     },
 
+    Read {
+        name: String,
+        path: Expr,
+    },
+
     Restart(String),
     End(String),
 

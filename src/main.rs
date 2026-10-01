@@ -1,5 +1,6 @@
 mod ast;
 mod cli;
+mod json;
 mod lexer;
 mod parser;
 mod runtime;
@@ -40,7 +41,7 @@ fn main() -> ExitCode {
         }
 
         Command::Version => {
-            println!("Foxash 1.0.0");
+            println!("Foxash {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
 

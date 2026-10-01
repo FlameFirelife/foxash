@@ -1,4 +1,5 @@
 use crate::ast::{BinaryOperator, Expr, Literal, Statement, TypeName, UnaryOperator};
+use crate::json;
 use crate::value::Value;
 
 use rand::Rng;
@@ -73,38 +74,6 @@ impl Runtime {
         Ok(())
     }
 
-    fn value_to_json(&self, value: &Value) -> String {
-        match value {
-            Value::Text(text) => {
-                format!("\"{}\"", self.escape_json(text))
-            }
-
-            Value::Number(number) => number.to_string(),
-
-            Value::Boolean(boolean) => boolean.to_string(),
-
-            Value::List(values) => {
-                let items = values
-                    .iter()
-                    .map(|value| self.value_to_json(value))
-                    .collect::<Vec<String>>()
-                    .join(", ");
-
-                format!("[{}]", items)
-            }
-
-            Value::Nothing => "null".to_string(),
-        }
-    }
-
-    fn escape_json(&self, text: &str) -> String {
-        text.replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t")
-    }
-
     fn execute_statement(&mut self, statement: &Statement) -> Result<(), ControlFlow> {
         match statement {
             Statement::Define { name, value } => {
@@ -144,12 +113,34 @@ impl Runtime {
                     }
                 };
 
-                let json = self.value_to_json(&value);
+                let json = json::stringify(&value).map_err(|message| RuntimeError { message })?;
 
                 fs::write(&path, json).map_err(|error| RuntimeError {
                     message: format!("Could not save '{}' to '{}': {}", variable, path, error),
                 })?;
 
+                Ok(())
+            }
+
+            Statement::Read { name, path } => {
+                let path = self.evaluate(path)?;
+                let path = match path {
+                    Value::Text(path) => path,
+                    _ => {
+                        return Err(RuntimeError {
+                            message: "Read path must be text".to_string(),
+                        }
+                        .into());
+                    }
+                };
+
+                let source = fs::read_to_string(&path).map_err(|error| RuntimeError {
+                    message: format!("Could not read JSON file '{}': {}", path, error),
+                })?;
+                let value = json::parse(&source).map_err(|error| RuntimeError {
+                    message: format!("Could not read JSON file '{}': {}", path, error),
+                })?;
+                self.define_variable(name, value);
                 Ok(())
             }
 
@@ -533,7 +524,7 @@ impl Runtime {
         left: Value,
         right: Value,
         operation: F,
-        operator_name: &str,
+        _operator_name: &str,
     ) -> Result<Value, RuntimeError>
     where
         F: FnOnce(f64, f64) -> f64,
@@ -549,7 +540,7 @@ impl Runtime {
         left: Value,
         right: Value,
         operation: F,
-        operator_name: &str,
+        _operator_name: &str,
     ) -> Result<Value, RuntimeError>
     where
         F: FnOnce(f64, f64) -> bool,
@@ -571,31 +562,42 @@ impl Runtime {
     }
 
     fn evaluate_index(&self, collection: Value, index: Value) -> Result<Value, RuntimeError> {
-        let index = match index {
-            Value::Number(value) if value.is_finite() && value.fract() == 0.0 && value >= 1.0 => {
-                value as usize
-            }
-
-            Value::Number(_) => {
-                return Err(RuntimeError {
-                    message: "List indexes must be positive whole numbers".to_string(),
-                });
-            }
-
-            _ => {
-                return Err(RuntimeError {
-                    message: "List indexes must be numbers".to_string(),
-                });
-            }
-        };
-
         match collection {
-            Value::List(values) => values.get(index - 1).cloned().ok_or_else(|| RuntimeError {
-                message: format!("List index {} is out of bounds", index),
-            }),
+            Value::List(values) => {
+                let index = match index {
+                    Value::Number(value)
+                        if value.is_finite() && value.fract() == 0.0 && value >= 1.0 =>
+                    {
+                        value as usize
+                    }
+                    Value::Number(_) => {
+                        return Err(RuntimeError {
+                            message: "List indexes must be positive whole numbers".to_string(),
+                        });
+                    }
+                    _ => {
+                        return Err(RuntimeError {
+                            message: "List indexes must be numbers".to_string(),
+                        });
+                    }
+                };
+
+                values.get(index - 1).cloned().ok_or_else(|| RuntimeError {
+                    message: format!("List index {} is out of bounds", index),
+                })
+            }
+
+            Value::Object(values) => match index {
+                Value::Text(key) => values.get(&key).cloned().ok_or_else(|| RuntimeError {
+                    message: format!("JSON object has no key '{}'", key),
+                }),
+                _ => Err(RuntimeError {
+                    message: "JSON object keys must be text".to_string(),
+                }),
+            },
 
             _ => Err(RuntimeError {
-                message: "Only lists can be indexed".to_string(),
+                message: "Only lists and JSON objects can be indexed".to_string(),
             }),
         }
     }

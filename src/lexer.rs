@@ -15,6 +15,8 @@ pub enum TokenKind {
     Add,
     To,
     Save,
+    Read,
+    Into,
 
     Loop,
     Restart,
@@ -391,6 +393,8 @@ impl Lexer {
             "add" => TokenKind::Add,
             "to" => TokenKind::To,
             "save" => TokenKind::Save,
+            "read" => TokenKind::Read,
+            "into" => TokenKind::Into,
 
             "loop" => TokenKind::Loop,
             "restart" => TokenKind::Restart,

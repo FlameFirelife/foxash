@@ -48,6 +48,7 @@ impl Parser {
             TokenKind::Restart => self.parse_restart(),
             TokenKind::End => self.parse_end(),
             TokenKind::Save => self.parse_save(),
+            TokenKind::Read => self.parse_read(),
             TokenKind::Identifier(_) => self.parse_identifier_statement(),
 
             _ => {
@@ -246,6 +247,17 @@ impl Parser {
         self.finish_statement()?;
 
         Ok(Statement::Save { variable, path })
+    }
+
+    fn parse_read(&mut self) -> Result<Statement, ParserError> {
+        self.expect_simple(TokenKind::Read)?;
+
+        let path = self.parse_expression()?;
+        self.expect_simple(TokenKind::Into)?;
+        let name = self.expect_identifier("Expected a variable name after 'into'")?;
+        self.finish_statement()?;
+
+        Ok(Statement::Read { name, path })
     }
 
     fn parse_identifier_statement(&mut self) -> Result<Statement, ParserError> {
