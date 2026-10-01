@@ -869,9 +869,7 @@ Foxash includes a VS Code extension in [`vscode-foxash`](vscode-foxash). Install
 code --install-extension vscode-foxash/foxash-0.1.0.vsix
 ```
 
-On Windows, run [`release_extension.bat`](release_extension.bat) to rebuild the VSIX package from the extension sources.
-
-The extension adds Foxash syntax highlighting, snippets, bracket matching, and **Foxash: Run File** / **Foxash: Check File** commands. Set `foxash.executablePath` in VS Code settings if the Foxash executable is not on your `PATH`.
+The extension adds Foxash syntax highlighting, snippets, bracket matching, and **Foxash: Run File** / **Foxash: Check File** commands.
 
 ---
 
