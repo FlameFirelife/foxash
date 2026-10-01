@@ -257,6 +257,38 @@ If the input does not match the selected type, Foxash reports an error and stops
 
 ---
 
+# Windows graphics
+
+Foxash can create native Windows(OS) windows with text and input boxes. Graphics currently work in the Windows build, not other operating systems.
+
+```foxash
+define greeting = window
+greeting size = 480, 280
+
+define name_box = box
+name_box size = 280, 34
+
+draw inside greeting {
+    background = pink
+    write("Welcome to Foxash") with textsize = 24 and textcolor = #ffffff
+    get name as text inside name_box = "What is your name?"
+    write("Hello, " + name + "!")
+}
+
+make greeting appear
+when name == "Ash": make greeting disappear
+```
+
+`window` creates a native window. `box` creates an input field when used with `get ... inside`. Sizes are pixel width and height. A window defaults to 640 by 480 pixels and a box defaults to 280 by 28 pixels.
+
+Inside `draw inside`, `background` accepts common color names (`pink`, `black`, `white`, `red`, `blue`, and others) or a three- or six-digit hex color such as `#ff00aa`. `write` displays a line of text at size 12 by default. `with textsize` changes its size, and `with textcolor` sets its color; omitted text colors use a contrasting black or white.
+
+`make name appear` opens the window. Inputs appear with a Submit button and are checked against their declared type. Text written after an input appears after Submit. The program continues while the window stays open; `make name disappear` closes it. If the program finishes while the window is open, it waits for the user to close the window.
+
+See [`examples/window_app.foxash`](examples/window_app.foxash) for a complete example.
+
+---
+
 # Operators
 
 ## Arithmetic
@@ -869,7 +901,7 @@ Foxash includes a VS Code extension in [`vscode-foxash`](vscode-foxash). Install
 code --install-extension vscode-foxash/foxash-0.1.0.vsix
 ```
 
-The extension adds Foxash syntax highlighting, snippets, bracket matching, and **Foxash: Run File** / **Foxash: Check File** commands.
+The extension adds Foxash syntax highlighting, snippets, bracket matching, and **Foxash: Run File** / **Foxash: Check File** commands.  
 
 ---
 
@@ -898,6 +930,6 @@ Errors include the file location when it is available.
 
 # Version
 
-This documentation describes **Foxash v1.2.5**.
+This documentation describes **Foxash v1.3.0**.
 
 Created by **FlameDev Studios**.

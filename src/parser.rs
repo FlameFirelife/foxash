@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOperator, Expr, Literal, Statement, TypeName, UnaryOperator};
+use crate::ast::{BinaryOperator, Expr, Literal, Statement, TextStyle, TypeName, UnaryOperator};
 use crate::lexer::{Token, TokenKind};
 use std::mem::discriminant;
 
@@ -49,6 +49,9 @@ impl Parser {
             TokenKind::End => self.parse_end(),
             TokenKind::Save => self.parse_save(),
             TokenKind::Read => self.parse_read(),
+            TokenKind::Draw => self.parse_draw_inside(),
+            TokenKind::Background => self.parse_background(),
+            TokenKind::Make => self.parse_make_window(),
             TokenKind::Identifier(_) => self.parse_identifier_statement(),
 
             _ => {
@@ -84,6 +87,12 @@ impl Parser {
             TypeName::Text
         };
 
+        let inside = if self.match_simple(TokenKind::Inside) {
+            Some(self.expect_identifier("Expected a box name after 'inside'")?)
+        } else {
+            None
+        };
+
         self.expect_simple(TokenKind::Equals)?;
 
         let prompt = self.parse_expression()?;
@@ -93,6 +102,7 @@ impl Parser {
             name,
             input_type,
             prompt,
+            inside,
         })
     }
 
@@ -102,11 +112,41 @@ impl Parser {
         self.expect_simple(TokenKind::LeftParen)?;
 
         let expression = self.parse_expression()?;
-
         self.expect_simple(TokenKind::RightParen)?;
+
+        let style = if self.match_simple(TokenKind::With) {
+            let mut size = None;
+            let mut color = None;
+
+            if self.match_simple(TokenKind::TextSize) {
+                self.expect_simple(TokenKind::Equals)?;
+                size = Some(self.parse_primary()?);
+            }
+
+            if self.match_simple(TokenKind::And) {
+                self.expect_simple(TokenKind::TextColor)?;
+                self.expect_simple(TokenKind::Equals)?;
+                color = Some(self.parse_color()?);
+            } else if self.match_simple(TokenKind::TextColor) {
+                self.expect_simple(TokenKind::Equals)?;
+                color = Some(self.parse_color()?);
+            }
+
+            if size.is_none() && color.is_none() {
+                let token = self.peek().clone();
+                return Err(
+                    self.error_at(&token, "Expected 'textsize' or 'textcolor' after 'with'")
+                );
+            }
+
+            Some(TextStyle { size, color })
+        } else {
+            None
+        };
+
         self.finish_statement()?;
 
-        Ok(Statement::Write(expression))
+        Ok(Statement::Write { expression, style })
     }
 
     fn parse_when(&mut self) -> Result<Statement, ParserError> {
@@ -260,7 +300,75 @@ impl Parser {
         Ok(Statement::Read { name, path })
     }
 
+    fn parse_draw_inside(&mut self) -> Result<Statement, ParserError> {
+        self.expect_simple(TokenKind::Draw)?;
+        self.expect_simple(TokenKind::Inside)?;
+        let name = self.expect_identifier("Expected a window name after 'draw inside'")?;
+        let body = self.parse_brace_block()?;
+
+        Ok(Statement::DrawInside { name, body })
+    }
+
+    fn parse_background(&mut self) -> Result<Statement, ParserError> {
+        self.expect_simple(TokenKind::Background)?;
+        self.expect_simple(TokenKind::Equals)?;
+        let color = self.parse_color()?;
+        self.finish_statement()?;
+
+        Ok(Statement::SetBackground(color))
+    }
+
+    fn parse_make_window(&mut self) -> Result<Statement, ParserError> {
+        self.expect_simple(TokenKind::Make)?;
+        let name = self.expect_identifier("Expected a window name after 'make'")?;
+        let appear = if self.match_simple(TokenKind::Appear) {
+            true
+        } else if self.match_simple(TokenKind::Disappear) {
+            false
+        } else {
+            let token = self.peek().clone();
+            return Err(self.error_at(
+                &token,
+                "Expected 'appear' or 'disappear' after the window name",
+            ));
+        };
+        self.finish_statement()?;
+
+        Ok(Statement::MakeWindow { name, appear })
+    }
+
+    fn parse_color(&mut self) -> Result<String, ParserError> {
+        let token = self.peek().clone();
+
+        match token.kind {
+            TokenKind::Color(value) | TokenKind::Identifier(value) => {
+                self.advance();
+                Ok(value)
+            }
+            _ => Err(self.error_at(
+                &token,
+                "Expected a color name or a hex color such as #ff00aa",
+            )),
+        }
+    }
+
     fn parse_identifier_statement(&mut self) -> Result<Statement, ParserError> {
+        if self.peek_next_is(&TokenKind::Size) {
+            let name = self.expect_identifier("Expected a window or box name")?;
+            self.expect_simple(TokenKind::Size)?;
+            self.expect_simple(TokenKind::Equals)?;
+            let width = self.parse_expression()?;
+            self.expect_simple(TokenKind::Comma)?;
+            let height = self.parse_expression()?;
+            self.finish_statement()?;
+
+            return Ok(Statement::SetSize {
+                name,
+                width,
+                height,
+            });
+        }
+
         if self.peek_next_is(&TokenKind::Equals) {
             let name = self.expect_identifier("Expected a variable name")?;
 
@@ -524,6 +632,16 @@ impl Parser {
                 self.advance();
 
                 Ok(Expr::Literal(Literal::Nothing))
+            }
+
+            TokenKind::Window => {
+                self.advance();
+                Ok(Expr::Window)
+            }
+
+            TokenKind::Box => {
+                self.advance();
+                Ok(Expr::GraphicBox)
             }
 
             TokenKind::Identifier(name) => {

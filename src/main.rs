@@ -1,5 +1,6 @@
 mod ast;
 mod cli;
+mod graphics;
 mod json;
 mod lexer;
 mod parser;

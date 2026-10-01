@@ -39,6 +39,9 @@ pub fn stringify(value: &Value) -> Result<String, String> {
                 .collect::<Result<Vec<_>, String>>()?;
             Ok(format!("{{{}}}", values.join(", ")))
         }
+        Value::Window | Value::GraphicBox => {
+            Err("Windows and boxes cannot be saved as JSON".to_string())
+        }
     }
 }
 

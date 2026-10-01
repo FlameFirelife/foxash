@@ -94,12 +94,13 @@ dependencies = [
 
 [[package]]
 name = "foxash"
-version = "1.2.5"
+version = "1.3.0"
 dependencies = [
  "assert_cmd",
  "predicates",
  "rand",
  "tempfile",
+ "windows-sys",
 ]
 
 [[package]]

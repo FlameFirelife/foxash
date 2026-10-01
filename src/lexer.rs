@@ -3,6 +3,7 @@ pub enum TokenKind {
     Identifier(String),
     Number(String),
     String(String),
+    Color(String),
 
     Define,
     Write,
@@ -17,6 +18,18 @@ pub enum TokenKind {
     Save,
     Read,
     Into,
+    Window,
+    Box,
+    Size,
+    Draw,
+    Inside,
+    Background,
+    With,
+    TextSize,
+    TextColor,
+    Make,
+    Appear,
+    Disappear,
 
     Loop,
     Restart,
@@ -118,6 +131,30 @@ impl Lexer {
 
                 '"' => {
                     tokens.push(self.read_string(line, column)?);
+                }
+
+                '#' => {
+                    self.advance();
+                    let mut value = String::new();
+
+                    while let Some(character) = self.peek() {
+                        if character.is_ascii_hexdigit() {
+                            value.push(character);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if value.is_empty() {
+                        return Err(self.error(
+                            "Expected a hexadecimal color after '#'",
+                            line,
+                            column,
+                        ));
+                    }
+
+                    tokens.push(self.token(TokenKind::Color(value), line, column));
                 }
 
                 '0'..='9' => {
@@ -395,6 +432,18 @@ impl Lexer {
             "save" => TokenKind::Save,
             "read" => TokenKind::Read,
             "into" => TokenKind::Into,
+            "window" => TokenKind::Window,
+            "box" => TokenKind::Box,
+            "size" => TokenKind::Size,
+            "draw" => TokenKind::Draw,
+            "inside" => TokenKind::Inside,
+            "background" => TokenKind::Background,
+            "with" => TokenKind::With,
+            "textsize" => TokenKind::TextSize,
+            "textcolor" => TokenKind::TextColor,
+            "make" => TokenKind::Make,
+            "appear" => TokenKind::Appear,
+            "disappear" => TokenKind::Disappear,
 
             "loop" => TokenKind::Loop,
             "restart" => TokenKind::Restart,

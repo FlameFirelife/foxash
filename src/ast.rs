@@ -14,6 +14,12 @@ pub enum Literal {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TextStyle {
+    pub size: Option<Expr>,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     Add,
     Subtract,
@@ -42,6 +48,8 @@ pub enum Expr {
     Literal(Literal),
     Variable(String),
     List(Vec<Expr>),
+    Window,
+    GraphicBox,
 
     Index {
         collection: Box<Expr>,
@@ -77,12 +85,16 @@ pub enum Statement {
         value: Expr,
     },
 
-    Write(Expr),
+    Write {
+        expression: Expr,
+        style: Option<TextStyle>,
+    },
 
     Get {
         name: String,
         input_type: TypeName,
         prompt: Expr,
+        inside: Option<String>,
     },
 
     When {
@@ -117,6 +129,24 @@ pub enum Statement {
     Read {
         name: String,
         path: Expr,
+    },
+
+    SetSize {
+        name: String,
+        width: Expr,
+        height: Expr,
+    },
+
+    DrawInside {
+        name: String,
+        body: Vec<Statement>,
+    },
+
+    SetBackground(String),
+
+    MakeWindow {
+        name: String,
+        appear: bool,
     },
 
     Restart(String),

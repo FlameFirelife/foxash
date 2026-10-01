@@ -8,6 +8,8 @@ pub enum Value {
     Boolean(bool),
     List(Vec<Value>),
     Object(BTreeMap<String, Value>),
+    Window,
+    GraphicBox,
     Nothing,
 }
 
@@ -53,6 +55,9 @@ impl fmt::Display for Value {
 
                 write!(formatter, "}}")
             }
+
+            Value::Window => write!(formatter, "window"),
+            Value::GraphicBox => write!(formatter, "box"),
 
             Value::Nothing => write!(formatter, "nothing"),
         }
