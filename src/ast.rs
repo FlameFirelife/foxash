@@ -19,6 +19,19 @@ pub struct TextStyle {
     pub color: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ButtonStyle {
+    pub size: Option<Expr>,
+    pub text_color: Option<String>,
+    pub button_color: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ButtonEvent {
+    Pressed,
+    Hovered,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     Add,
@@ -50,6 +63,11 @@ pub enum Expr {
     List(Vec<Expr>),
     Window,
     GraphicBox,
+    GraphicButton,
+    ButtonEvent {
+        name: String,
+        event: ButtonEvent,
+    },
 
     Index {
         collection: Box<Expr>,
@@ -95,6 +113,8 @@ pub enum Statement {
         input_type: TypeName,
         prompt: Expr,
         inside: Option<String>,
+        button: Option<String>,
+        button_style: ButtonStyle,
     },
 
     When {
@@ -143,6 +163,22 @@ pub enum Statement {
     },
 
     SetBackground(String),
+
+    ShowImage {
+        path: String,
+        width: Option<Expr>,
+        height: Option<Expr>,
+    },
+
+    SetButtonText {
+        name: String,
+        text: Expr,
+    },
+
+    SetButtonStyle {
+        name: String,
+        style: ButtonStyle,
+    },
 
     MakeWindow {
         name: String,

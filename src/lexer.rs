@@ -4,6 +4,7 @@ pub enum TokenKind {
     Number(String),
     String(String),
     Color(String),
+    FilePath(String),
 
     Define,
     Write,
@@ -30,6 +31,13 @@ pub enum TokenKind {
     Make,
     Appear,
     Disappear,
+    Show,
+    Button,
+    ButtonColor,
+    Is,
+    Pressed,
+    Hovered,
+    Says,
 
     Loop,
     Restart,
@@ -114,6 +122,16 @@ impl Lexer {
         while let Some(character) = self.peek() {
             let line = self.line;
             let column = self.column;
+
+            if matches!(
+                tokens.last().map(|token: &Token| &token.kind),
+                Some(TokenKind::Show)
+            ) && !character.is_whitespace()
+                && character != '"'
+            {
+                tokens.push(self.read_file_path(line, column));
+                continue;
+            }
 
             match character {
                 ' ' | '\t' | '\r' => {
@@ -444,6 +462,13 @@ impl Lexer {
             "make" => TokenKind::Make,
             "appear" => TokenKind::Appear,
             "disappear" => TokenKind::Disappear,
+            "show" => TokenKind::Show,
+            "button" => TokenKind::Button,
+            "buttoncolor" => TokenKind::ButtonColor,
+            "is" => TokenKind::Is,
+            "pressed" => TokenKind::Pressed,
+            "hovered" => TokenKind::Hovered,
+            "says" => TokenKind::Says,
 
             "loop" => TokenKind::Loop,
             "restart" => TokenKind::Restart,
@@ -465,6 +490,20 @@ impl Lexer {
         };
 
         self.token(kind, line, column)
+    }
+
+    fn read_file_path(&mut self, line: usize, column: usize) -> Token {
+        let mut value = String::new();
+
+        while let Some(character) = self.peek() {
+            if character.is_whitespace() || matches!(character, ',' | ';' | '{' | '}' | '(' | ')') {
+                break;
+            }
+            value.push(character);
+            self.advance();
+        }
+
+        self.token(TokenKind::FilePath(value), line, column)
     }
 
     fn skip_comment(&mut self) {

@@ -104,7 +104,7 @@ fn process_file(path: &Path, run: bool) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::with_asset_directory(path.parent().map(Path::to_path_buf));
 
     if let Err(error) = runtime.execute(&statements) {
         eprintln!("Runtime error in {}: {}", path.display(), error.message);

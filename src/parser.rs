@@ -1,4 +1,7 @@
-use crate::ast::{BinaryOperator, Expr, Literal, Statement, TextStyle, TypeName, UnaryOperator};
+use crate::ast::{
+    BinaryOperator, ButtonEvent, ButtonStyle, Expr, Literal, Statement, TextStyle, TypeName,
+    UnaryOperator,
+};
 use crate::lexer::{Token, TokenKind};
 use std::mem::discriminant;
 
@@ -52,6 +55,7 @@ impl Parser {
             TokenKind::Draw => self.parse_draw_inside(),
             TokenKind::Background => self.parse_background(),
             TokenKind::Make => self.parse_make_window(),
+            TokenKind::Show => self.parse_show_image(),
             TokenKind::Identifier(_) => self.parse_identifier_statement(),
 
             _ => {
@@ -96,6 +100,47 @@ impl Parser {
         self.expect_simple(TokenKind::Equals)?;
 
         let prompt = self.parse_expression()?;
+
+        let mut button = None;
+        let mut button_style = ButtonStyle::default();
+        if self.match_simple(TokenKind::With) {
+            loop {
+                match self.peek_kind() {
+                    TokenKind::Button => {
+                        self.advance();
+                        self.expect_simple(TokenKind::LeftParen)?;
+                        button = Some(self.expect_identifier("Expected a button name")?);
+                        self.expect_simple(TokenKind::RightParen)?;
+                    }
+                    TokenKind::TextSize => {
+                        self.advance();
+                        self.expect_simple(TokenKind::Equals)?;
+                        button_style.size = Some(self.parse_primary()?);
+                    }
+                    TokenKind::TextColor => {
+                        self.advance();
+                        self.expect_simple(TokenKind::Equals)?;
+                        button_style.text_color = Some(self.parse_color()?);
+                    }
+                    TokenKind::ButtonColor => {
+                        self.advance();
+                        self.expect_simple(TokenKind::Equals)?;
+                        button_style.button_color = Some(self.parse_color()?);
+                    }
+                    _ => {
+                        let token = self.peek().clone();
+                        return Err(
+                            self.error_at(&token, "Expected a button or button style after 'with'")
+                        );
+                    }
+                }
+
+                if self.match_simple(TokenKind::And) || self.match_simple(TokenKind::With) {
+                    continue;
+                }
+                break;
+            }
+        }
         self.finish_statement()?;
 
         Ok(Statement::Get {
@@ -103,6 +148,8 @@ impl Parser {
             input_type,
             prompt,
             inside,
+            button,
+            button_style,
         })
     }
 
@@ -337,6 +384,39 @@ impl Parser {
         Ok(Statement::MakeWindow { name, appear })
     }
 
+    fn parse_show_image(&mut self) -> Result<Statement, ParserError> {
+        self.expect_simple(TokenKind::Show)?;
+        let token = self.peek().clone();
+        let path = match token.kind {
+            TokenKind::String(path) | TokenKind::FilePath(path) => {
+                self.advance();
+                path
+            }
+            _ => {
+                return Err(
+                    self.error_at(&token, "Expected an image or JSON file path after 'show'")
+                )
+            }
+        };
+
+        let (width, height) = if self.match_simple(TokenKind::Size) {
+            self.expect_simple(TokenKind::Equals)?;
+            let width = self.parse_expression()?;
+            self.expect_simple(TokenKind::Comma)?;
+            let height = self.parse_expression()?;
+            (Some(width), Some(height))
+        } else {
+            (None, None)
+        };
+
+        self.finish_statement()?;
+        Ok(Statement::ShowImage {
+            path,
+            width,
+            height,
+        })
+    }
+
     fn parse_color(&mut self) -> Result<String, ParserError> {
         let token = self.peek().clone();
 
@@ -353,6 +433,21 @@ impl Parser {
     }
 
     fn parse_identifier_statement(&mut self) -> Result<Statement, ParserError> {
+        if self.peek_next_is(&TokenKind::Says) {
+            let name = self.expect_identifier("Expected a button name")?;
+            self.expect_simple(TokenKind::Says)?;
+            let text = self.parse_expression()?;
+            self.finish_statement()?;
+            return Ok(Statement::SetButtonText { name, text });
+        }
+
+        if matches!(
+            self.peek_next_kind(),
+            TokenKind::TextSize | TokenKind::TextColor | TokenKind::ButtonColor
+        ) {
+            return self.parse_button_style_statement();
+        }
+
         if self.peek_next_is(&TokenKind::Size) {
             let name = self.expect_identifier("Expected a window or box name")?;
             self.expect_simple(TokenKind::Size)?;
@@ -384,6 +479,41 @@ impl Parser {
         self.finish_statement()?;
 
         Ok(Statement::Expression(expression))
+    }
+
+    fn parse_button_style_statement(&mut self) -> Result<Statement, ParserError> {
+        let name = self.expect_identifier("Expected a button name")?;
+        let mut style = ButtonStyle::default();
+        loop {
+            match self.peek_kind() {
+                TokenKind::TextSize => {
+                    self.advance();
+                    self.expect_simple(TokenKind::Equals)?;
+                    style.size = Some(self.parse_primary()?);
+                }
+                TokenKind::TextColor => {
+                    self.advance();
+                    self.expect_simple(TokenKind::Equals)?;
+                    style.text_color = Some(self.parse_color()?);
+                }
+                TokenKind::ButtonColor => {
+                    self.advance();
+                    self.expect_simple(TokenKind::Equals)?;
+                    style.button_color = Some(self.parse_color()?);
+                }
+                _ => {
+                    let token = self.peek().clone();
+                    return Err(
+                        self.error_at(&token, "Expected textsize, textcolor, or buttoncolor")
+                    );
+                }
+            }
+            if !self.match_simple(TokenKind::And) {
+                break;
+            }
+        }
+        self.finish_statement()?;
+        Ok(Statement::SetButtonStyle { name, style })
     }
 
     fn parse_control_body(&mut self) -> Result<Vec<Statement>, ParserError> {
@@ -482,6 +612,29 @@ impl Parser {
         let mut expression = self.parse_term()?;
 
         loop {
+            if self.match_simple(TokenKind::Is) {
+                let name = match expression {
+                    Expr::Variable(name) => name,
+                    _ => {
+                        let token = self.peek().clone();
+                        return Err(self.error_at(
+                            &token,
+                            "Only a button can be checked with 'is pressed' or 'is hovered'",
+                        ));
+                    }
+                };
+                let event = if self.match_simple(TokenKind::Pressed) {
+                    ButtonEvent::Pressed
+                } else if self.match_simple(TokenKind::Hovered) {
+                    ButtonEvent::Hovered
+                } else {
+                    let token = self.peek().clone();
+                    return Err(self.error_at(&token, "Expected 'pressed' or 'hovered' after 'is'"));
+                };
+                expression = Expr::ButtonEvent { name, event };
+                continue;
+            }
+
             let operator = match self.peek_kind() {
                 TokenKind::EqualEqual => BinaryOperator::Equal,
                 TokenKind::NotEqual => BinaryOperator::NotEqual,
@@ -644,6 +797,11 @@ impl Parser {
                 Ok(Expr::GraphicBox)
             }
 
+            TokenKind::Button => {
+                self.advance();
+                Ok(Expr::GraphicButton)
+            }
+
             TokenKind::Identifier(name) => {
                 self.advance();
 
@@ -795,6 +953,13 @@ impl Parser {
         }
 
         discriminant(&self.tokens[self.position + 1].kind) == discriminant(expected)
+    }
+
+    fn peek_next_kind(&self) -> &TokenKind {
+        self.tokens
+            .get(self.position + 1)
+            .map(|token| &token.kind)
+            .unwrap_or(&TokenKind::Eof)
     }
 
     fn peek(&self) -> &Token {

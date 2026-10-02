@@ -257,33 +257,50 @@ If the input does not match the selected type, Foxash reports an error and stops
 
 ---
 
-# Windows graphics
+# Graphics windows
 
-Foxash can create native Windows(OS) windows with text and input boxes. Graphics currently work in the Windows build, not other operating systems.
+Foxash opens graphics windows using native desktop controls. Windows uses the Windows graphics APIs. Linux uses GTK 3. Foxash does not launch a web browser or need an internet connection for graphics.
 
 ```foxash
 define greeting = window
-greeting size = 480, 280
+greeting size = 480, 320
 
 define name_box = box
 name_box size = 280, 34
 
+define continue = button
+continue says "Continue"
+
 draw inside greeting {
     background = pink
+    show logo.png size = 160, 120
     write("Welcome to Foxash") with textsize = 24 and textcolor = #ffffff
-    get name as text inside name_box = "What is your name?"
+    get name as text inside name_box = "What is your name?" with button(continue) with textsize = 16 and textcolor = #ffffff and buttoncolor = #444343
     write("Hello, " + name + "!")
 }
 
 make greeting appear
-when name == "Ash": make greeting disappear
+
+when continue is hovered {
+    continue buttoncolor = #222222 and textcolor = #ffffff
+}
+
+when continue is pressed {
+    make greeting disappear
+}
 ```
 
-`window` creates a native window. `box` creates an input field when used with `get ... inside`. Sizes are pixel width and height. A window defaults to 640 by 480 pixels and a box defaults to 280 by 28 pixels.
+`window` creates a window. A window starts at 640 by 480 pixels. `box` makes an input box for `get`; a box starts at 280 by 28 pixels. Set either size with `name size = width, height`. Sizes use pixels.
 
-Inside `draw inside`, `background` accepts common color names (`pink`, `black`, `white`, `red`, `blue`, and others) or a three- or six-digit hex color such as `#ff00aa`. `write` displays a line of text at size 12 by default. `with textsize` changes its size, and `with textcolor` sets its color; omitted text colors use a contrasting black or white.
+Inside `draw inside`, `background` sets the window color. Use a color name such as `pink` or a three- or six-digit hex color such as `#ff00aa`. `write` displays text. Its default size is 12; `with textsize` changes the size and `with textcolor` changes the color.
 
-`make name appear` opens the window. Inputs appear with a Submit button and are checked against their declared type. Text written after an input appears after Submit. The program continues while the window stays open; `make name disappear` closes it. If the program finishes while the window is open, it waits for the user to close the window.
+Use `show file.png` to display an image, or `show file.png size = 160, 120` to set its size. Foxash displays PNG, JPEG, GIF, BMP, TIFF, WebP, and SVG images when the operating system has a decoder for that format. JSON files appear as text. File paths are relative to the folder containing the `.foxash` program. Put `show` inside a `draw inside` block. Linux graphics require GTK 3 and a desktop session.
+
+Define a custom button with `define name = button`. Use `name says "Continue"` to set its label. Add `button(name)` to a `get` line to use it for that input. `with textsize`, `with textcolor`, and `with buttoncolor` set the button’s appearance.
+
+`when name is pressed` runs its block when the button is clicked. `when name is hovered` runs its block when the pointer moves over the button. You can change a button’s style with `name buttoncolor = #222222 and textcolor = #ffffff`.
+
+`make name appear` opens the window. Input values are checked against their types when the button is clicked. Text after an input appears after it is submitted. `make name disappear` closes the window. If the program finishes while a window is open, Foxash waits for the window to close.
 
 See [`examples/window_app.foxash`](examples/window_app.foxash) for a complete example.
 
@@ -898,8 +915,9 @@ foxash version
 Foxash includes a VS Code extension in [`vscode-foxash`](vscode-foxash). Install the packaged extension with:
 
 ```text
-code --install-extension vscode-foxash/foxash-0.1.0.vsix
+code --install-extension vscode-foxash/foxash-0.2.0.vsix
 ```
+or by manually installing it via vsix in VS Code's extension manager.
 
 The extension adds Foxash syntax highlighting, snippets, bracket matching, and **Foxash: Run File** / **Foxash: Check File** commands.  
 
@@ -930,6 +948,6 @@ Errors include the file location when it is available.
 
 # Version
 
-This documentation describes **Foxash v1.3.0**.
+This documentation describes **Foxash v1.4.0**.
 
 Created by **FlameDev Studios**.

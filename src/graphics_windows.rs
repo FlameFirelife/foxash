@@ -1,24 +1,33 @@
-use super::{TextLine, WindowScene};
+use super::{ButtonView, SceneItem, WindowEvent, WindowScene};
+use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect,
-    SelectObject, SetBkMode, SetTextColor, TextOutW, DEFAULT_CHARSET, DEFAULT_PITCH,
-    DEFAULT_QUALITY, FW_NORMAL, PAINTSTRUCT, TRANSPARENT,
+    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect,
+    InvalidateRect, SelectObject, SetBkMode, SetTextColor, TextOutW, DEFAULT_CHARSET,
+    DEFAULT_PITCH, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE, DT_VCENTER, FW_NORMAL, PAINTSTRUCT,
+    TRANSPARENT,
+};
+use windows_sys::Win32::Graphics::GdiPlus::{
+    GdipCreateBitmapFromFile, GdipCreateFromHDC, GdipDeleteGraphics, GdipDisposeImage,
+    GdipDrawImageRectI, GdipGetImageDimension, GdiplusShutdown, GdiplusStartup,
+    GdiplusStartupInput, GpBitmap, GpGraphics, GpImage,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_SELECTED};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW,
-    GetWindowLongPtrW, GetWindowTextW, KillTimer, LoadCursorW, PostQuitMessage, RegisterClassW,
-    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
-    UnregisterClassW, BN_CLICKED, BS_DEFPUSHBUTTON, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
-    ES_AUTOHSCROLL, GWLP_USERDATA, IDC_ARROW, MSG, SWP_NOMOVE, SWP_NOZORDER, SW_HIDE, SW_SHOW,
-    WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_NCCREATE, WM_PAINT, WM_TIMER,
-    WNDCLASSW, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetCursorPos,
+    GetMessageW, GetWindowLongPtrW, GetWindowTextW, KillTimer, LoadCursorW, PostQuitMessage,
+    RegisterClassW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+    TranslateMessage, UnregisterClassW, WindowFromPoint, BN_CLICKED, BS_OWNERDRAW, CREATESTRUCTW,
+    CS_HREDRAW, CS_VREDRAW, ES_AUTOHSCROLL, GWLP_USERDATA, IDC_ARROW, MSG, SWP_NOMOVE,
+    SWP_NOZORDER, SW_HIDE, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_DRAWITEM,
+    WM_ERASEBKGND, WM_NCCREATE, WM_PAINT, WM_TIMER, WNDCLASSW, WS_CHILD, WS_EX_CLIENTEDGE,
+    WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
 };
 
 const SUBMIT_BUTTON_ID: usize = 1;
@@ -28,42 +37,57 @@ const COMMAND_POLL_MILLISECONDS: u32 = 35;
 static NEXT_CLASS_ID: AtomicUsize = AtomicUsize::new(1);
 
 enum WindowCommand {
-    CompleteInput(Vec<TextLine>),
+    CompleteInput(Vec<SceneItem>),
     RejectInput(String),
+    UpdateButton(ButtonView),
     Close,
-}
-
-enum WindowEvent {
-    Input(Vec<String>),
-    Closed,
 }
 
 pub struct WindowHandle {
     command_sender: Sender<WindowCommand>,
     event_receiver: Receiver<WindowEvent>,
     thread: Option<JoinHandle<()>>,
+    pending_events: VecDeque<WindowEvent>,
 }
 
 impl WindowHandle {
-    pub fn wait_for_input(&self) -> Result<Vec<String>, String> {
-        match self.event_receiver.recv() {
-            Ok(WindowEvent::Input(values)) => Ok(values),
-            Ok(WindowEvent::Closed) => {
-                Err("The window was closed before its input was submitted".to_string())
+    pub fn wait_for_event(&mut self) -> Result<WindowEvent, String> {
+        if let Some(event) = self.pending_events.pop_front() {
+            return Ok(event);
+        }
+        self.event_receiver
+            .recv()
+            .map_err(|_| "The Foxash window stopped unexpectedly".to_string())
+    }
+
+    pub fn wait_for_input(&mut self) -> Result<(Vec<String>, Option<String>), String> {
+        loop {
+            match self.event_receiver.recv() {
+                Ok(WindowEvent::Input { values, button }) => return Ok((values, button)),
+                Ok(WindowEvent::Closed) => {
+                    return Err("The window was closed before its input was submitted".to_string())
+                }
+                Ok(event) => self.pending_events.push_back(event),
+                Err(_) => return Err("The Foxash window stopped unexpectedly".to_string()),
             }
-            Err(_) => Err("The Foxash window stopped unexpectedly".to_string()),
         }
     }
 
-    pub fn complete_input(&self, lines: Vec<TextLine>) -> Result<(), String> {
+    pub fn complete_input(&self, items: Vec<SceneItem>) -> Result<(), String> {
         self.command_sender
-            .send(WindowCommand::CompleteInput(lines))
+            .send(WindowCommand::CompleteInput(items))
             .map_err(|_| "The Foxash window has already closed".to_string())
     }
 
     pub fn reject_input(&self, error: String) -> Result<(), String> {
         self.command_sender
             .send(WindowCommand::RejectInput(error))
+            .map_err(|_| "The Foxash window has already closed".to_string())
+    }
+
+    pub fn update_button(&self, button: ButtonView) -> Result<(), String> {
+        self.command_sender
+            .send(WindowCommand::UpdateButton(button))
             .map_err(|_| "The Foxash window has already closed".to_string())
     }
 
@@ -82,7 +106,7 @@ impl WindowHandle {
         loop {
             match self.event_receiver.recv() {
                 Ok(WindowEvent::Closed) | Err(_) => break,
-                Ok(WindowEvent::Input(_)) => {}
+                Ok(_) => {}
             }
         }
 
@@ -114,6 +138,7 @@ pub fn launch_window(scene: WindowScene) -> Result<WindowHandle, String> {
             command_sender,
             event_receiver,
             thread: Some(thread),
+            pending_events: VecDeque::new(),
         }),
         Ok(Err(error)) => {
             let _ = thread.join();
@@ -136,6 +161,9 @@ struct WindowState {
     command_receiver: Receiver<WindowCommand>,
     event_sender: Sender<WindowEvent>,
     instance: windows_sys::Win32::Foundation::HINSTANCE,
+    hover_was_inside: bool,
+    button_override: Option<String>,
+    native_images: Vec<Option<*mut GpImage>>,
 }
 
 fn run_window(
@@ -177,10 +205,26 @@ fn run_window(
             ));
         }
 
-        let minimum_height = layout(&scene).button_y + 70;
+        let mut gdiplus_token = 0usize;
+        let gdiplus_input = GdiplusStartupInput {
+            GdiplusVersion: 1,
+            DebugEventCallback: 0,
+            SuppressBackgroundThread: 0,
+            SuppressExternalCodecs: 0,
+        };
+        if GdiplusStartup(&mut gdiplus_token, &gdiplus_input, null_mut()) != 0 {
+            UnregisterClassW(class_name.as_ptr(), instance);
+            return Err("Foxash could not start the native Windows image renderer".to_string());
+        }
+
+        let native_images = load_native_images(&scene.items);
+        let minimum_height = layout(&scene, &native_images).button_y + 70;
         scene.height = scene.height.max(minimum_height);
         let mut state = Box::new(WindowState {
-            submitted: scene.inputs.is_empty(),
+            submitted: !scene
+                .items
+                .iter()
+                .any(|item| matches!(item, SceneItem::Input(_))),
             scene,
             edits: Vec::new(),
             button: null_mut(),
@@ -189,6 +233,9 @@ fn run_window(
             command_receiver,
             event_sender,
             instance,
+            hover_was_inside: false,
+            button_override: None,
+            native_images,
         });
         let state_pointer = (&mut *state as *mut WindowState).cast::<c_void>();
 
@@ -208,6 +255,7 @@ fn run_window(
         );
 
         if window.is_null() {
+            GdiplusShutdown(gdiplus_token);
             UnregisterClassW(class_name.as_ptr(), instance);
             return Err(format!(
                 "Could not create window '{}' (error {})",
@@ -218,11 +266,15 @@ fn run_window(
 
         if let Some(error) = state.error.take() {
             DestroyWindow(window);
+            dispose_native_images(&state.native_images);
+            GdiplusShutdown(gdiplus_token);
             UnregisterClassW(class_name.as_ptr(), instance);
             return Err(error);
         }
         if state.button.is_null() {
             DestroyWindow(window);
+            dispose_native_images(&state.native_images);
+            GdiplusShutdown(gdiplus_token);
             UnregisterClassW(class_name.as_ptr(), instance);
             return Err("Foxash could not create the window button".to_string());
         }
@@ -240,6 +292,8 @@ fn run_window(
             }
             if result == -1 {
                 DestroyWindow(window);
+                dispose_native_images(&state.native_images);
+                GdiplusShutdown(gdiplus_token);
                 UnregisterClassW(class_name.as_ptr(), instance);
                 let _ = state.event_sender.send(WindowEvent::Closed);
                 return Err(format!(
@@ -252,6 +306,8 @@ fn run_window(
             DispatchMessageW(&message);
         }
 
+        dispose_native_images(&state.native_images);
+        GdiplusShutdown(gdiplus_token);
         UnregisterClassW(class_name.as_ptr(), instance);
     }
 
@@ -259,7 +315,7 @@ fn run_window(
 }
 
 struct Layout {
-    text_y: Vec<i32>,
+    item_y: Vec<i32>,
     prompt_y: Vec<i32>,
     edit_y: Vec<i32>,
     edit_width: Vec<i32>,
@@ -267,37 +323,92 @@ struct Layout {
     button_y: i32,
 }
 
-fn layout(scene: &WindowScene) -> Layout {
+fn layout(scene: &WindowScene, native_images: &[Option<*mut GpImage>]) -> Layout {
     let mut y = 20;
-    let mut text_y = Vec::with_capacity(scene.text.len());
-    for line in &scene.text {
-        text_y.push(y);
-        y += line.size.max(12) + 14;
-    }
-
-    let mut prompt_y = Vec::with_capacity(scene.inputs.len());
-    let mut edit_y = Vec::with_capacity(scene.inputs.len());
-    let mut edit_width = Vec::with_capacity(scene.inputs.len());
-    let mut edit_height = Vec::with_capacity(scene.inputs.len());
-    for input in &scene.inputs {
-        y += 8;
-        prompt_y.push(y);
-        y += 24;
-        edit_y.push(y);
-        let width = input.width.clamp(20, (scene.width - 40).max(20));
-        let height = input.height.max(24);
-        edit_width.push(width);
-        edit_height.push(height);
-        y += height + 12;
+    let mut item_y = Vec::with_capacity(scene.items.len());
+    let mut prompt_y = Vec::new();
+    let mut edit_y = Vec::new();
+    let mut edit_width = Vec::new();
+    let mut edit_height = Vec::new();
+    let mut image_index = 0;
+    for item in &scene.items {
+        match item {
+            SceneItem::Text(line) => {
+                item_y.push(y);
+                y += line.size.max(12) + 14;
+            }
+            SceneItem::Input(input) => {
+                y += 8;
+                item_y.push(y);
+                prompt_y.push(y);
+                y += 24;
+                edit_y.push(y);
+                let width = input.width.clamp(20, (scene.width - 40).max(20));
+                let height = input.height.max(24);
+                edit_width.push(width);
+                edit_height.push(height);
+                y += height + 12;
+            }
+            SceneItem::Image(image) => {
+                item_y.push(y);
+                let native_image = native_images.get(image_index).copied().flatten();
+                let (_, height) = display_image_size(image, native_image, scene.width);
+                y += height + 12;
+                image_index += 1;
+            }
+        }
     }
 
     Layout {
-        text_y,
+        item_y,
         prompt_y,
         edit_y,
         edit_width,
         edit_height,
         button_y: y.max(24),
+    }
+}
+
+fn display_image_size(
+    image: &super::ImageAsset,
+    native_image: Option<*mut GpImage>,
+    window_width: i32,
+) -> (i32, i32) {
+    let mut natural_width = 240.0f32;
+    let mut natural_height = 160.0f32;
+    if let Some(native_image) = native_image {
+        unsafe {
+            GdipGetImageDimension(native_image, &mut natural_width, &mut natural_height);
+        }
+        if natural_width <= 0.0 || natural_height <= 0.0 {
+            natural_width = 240.0;
+            natural_height = 160.0;
+        }
+    }
+    let maximum_width = (window_width - 40).max(40);
+    match (image.width, image.height) {
+        (Some(width), Some(height)) => (width.max(1), height.max(1)),
+        (Some(width), None) => {
+            let width = width.max(1).min(maximum_width);
+            let height = ((width as f32 * natural_height / natural_width).round() as i32).max(1);
+            (width, height)
+        }
+        (None, Some(height)) => {
+            let height = height.max(1);
+            let width = ((height as f32 * natural_width / natural_height).round() as i32)
+                .max(1)
+                .min(maximum_width);
+            (width, height)
+        }
+        (None, None) => {
+            let scale = (320.0 / natural_width)
+                .min(220.0 / natural_height)
+                .min(maximum_width as f32 / natural_width);
+            (
+                (natural_width * scale).round().max(1.0) as i32,
+                (natural_height * scale).round().max(1.0) as i32,
+            )
+        }
     }
 }
 
@@ -321,8 +432,14 @@ unsafe extern "system" fn window_proc(
 
     match message {
         WM_CREATE => {
-            let positions = layout(&state.scene);
-            for (index, _) in state.scene.inputs.iter().enumerate() {
+            let positions = layout(&state.scene, &state.native_images);
+            for (index, _) in state
+                .scene
+                .items
+                .iter()
+                .filter(|item| matches!(item, SceneItem::Input(_)))
+                .enumerate()
+            {
                 let edit_class = to_wide("EDIT");
                 let empty = to_wide("");
                 let edit = CreateWindowExW(
@@ -347,16 +464,18 @@ unsafe extern "system" fn window_proc(
             }
 
             let button_class = to_wide("BUTTON");
-            let button_text = to_wide(if state.scene.inputs.is_empty() {
-                "Close"
-            } else {
-                "Submit"
-            });
+            let button_text = to_wide(
+                if state.scene.submit_button.name.is_none() && state.submitted {
+                    "Close"
+                } else {
+                    &state.scene.submit_button.label
+                },
+            );
             state.button = CreateWindowExW(
                 0,
                 button_class.as_ptr(),
                 button_text.as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON as u32,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW as u32,
                 20,
                 positions.button_y,
                 110,
@@ -372,15 +491,23 @@ unsafe extern "system" fn window_proc(
             while let Ok(command) = state.command_receiver.try_recv() {
                 match command {
                     WindowCommand::CompleteInput(lines) => {
-                        state.scene.text.extend(lines);
+                        state.native_images.extend(load_native_images(&lines));
+                        state.scene.items.extend(lines);
                         state.submitted = true;
                         state.submission_pending = false;
                         state.error = None;
+                        state.button_override = if state.scene.submit_button.name.is_none() {
+                            Some("Close".to_string())
+                        } else {
+                            None
+                        };
                         for edit in &state.edits {
                             ShowWindow(*edit, SW_HIDE);
                         }
-                        SetWindowTextW(state.button, to_wide("Close").as_ptr());
-                        let positions = layout(&state.scene);
+                        if state.scene.submit_button.name.is_none() {
+                            SetWindowTextW(state.button, to_wide("Close").as_ptr());
+                        }
+                        let positions = layout(&state.scene, &state.native_images);
                         state.scene.height = state.scene.height.max(positions.button_y + 70);
                         SetWindowPos(
                             window,
@@ -405,15 +532,35 @@ unsafe extern "system" fn window_proc(
                     WindowCommand::RejectInput(error) => {
                         state.error = Some(error);
                         state.submission_pending = false;
-                        SetWindowTextW(state.button, to_wide("Submit").as_ptr());
+                        state.button_override = None;
                         InvalidateRect(window, null(), 1);
+                    }
+                    WindowCommand::UpdateButton(button) => {
+                        state.scene.submit_button = button;
+                        InvalidateRect(state.button, null(), 1);
                     }
                     WindowCommand::Close => {
                         DestroyWindow(window);
                     }
                 }
             }
+            if state.scene.submit_button.name.is_some() {
+                let mut cursor = POINT { x: 0, y: 0 };
+                let inside =
+                    GetCursorPos(&mut cursor) != 0 && WindowFromPoint(cursor) == state.button;
+                if inside && !state.hover_was_inside {
+                    if let Some(name) = state.scene.submit_button.name.clone() {
+                        let _ = state.event_sender.send(WindowEvent::ButtonHovered(name));
+                    }
+                }
+                state.hover_was_inside = inside;
+            }
             0
+        }
+        WM_DRAWITEM if wparam as usize == SUBMIT_BUTTON_ID => {
+            let draw = &*(lparam as *const DRAWITEMSTRUCT);
+            paint_button(draw, state);
+            1
         }
         WM_ERASEBKGND => {
             let hdc = wparam as windows_sys::Win32::Graphics::Gdi::HDC;
@@ -432,8 +579,18 @@ unsafe extern "system" fn window_proc(
             if (wparam & 0xffff) as usize == SUBMIT_BUTTON_ID
                 && ((wparam >> 16) & 0xffff) as u32 == BN_CLICKED =>
         {
-            if state.submitted || state.scene.inputs.is_empty() {
-                DestroyWindow(window);
+            if state.submitted
+                || !state
+                    .scene
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, SceneItem::Input(_)))
+            {
+                if let Some(name) = state.scene.submit_button.name.clone() {
+                    let _ = state.event_sender.send(WindowEvent::ButtonPressed(name));
+                } else {
+                    DestroyWindow(window);
+                }
                 return 0;
             }
             if state.submission_pending {
@@ -445,10 +602,18 @@ unsafe extern "system" fn window_proc(
                 .iter()
                 .map(|edit| window_text(*edit))
                 .collect::<Vec<_>>();
-            if state.event_sender.send(WindowEvent::Input(inputs)).is_ok() {
+            if state
+                .event_sender
+                .send(WindowEvent::Input {
+                    values: inputs,
+                    button: state.scene.submit_button.name.clone(),
+                })
+                .is_ok()
+            {
                 state.submission_pending = true;
                 state.error = None;
-                SetWindowTextW(state.button, to_wide("Checking...").as_ptr());
+                state.button_override = Some("Checking...".to_string());
+                InvalidateRect(state.button, null(), 1);
             } else {
                 DestroyWindow(window);
             }
@@ -478,23 +643,83 @@ unsafe fn paint(window: HWND, state: &WindowState) {
     DeleteObject(brush);
     SetBkMode(hdc, TRANSPARENT as i32);
 
-    let positions = layout(&state.scene);
-    for (index, line) in state.scene.text.iter().enumerate() {
-        draw_text(
-            hdc,
-            20,
-            positions.text_y[index],
-            &line.text,
-            line.size,
-            line.color,
-        );
+    let positions = layout(&state.scene, &state.native_images);
+    let mut graphics: *mut GpGraphics = null_mut();
+    let has_images = state.scene.items.iter().any(
+        |item| matches!(item, SceneItem::Image(image) if image.mime_type != "application/json"),
+    );
+    if has_images {
+        GdipCreateFromHDC(hdc, &mut graphics);
     }
-
-    if !state.submitted {
-        let color = opposite_color(state.scene.background);
-        for (index, input) in state.scene.inputs.iter().enumerate() {
-            draw_text(hdc, 20, positions.prompt_y[index], &input.prompt, 12, color);
+    let mut input_index = 0;
+    let mut image_index = 0;
+    for (index, item) in state.scene.items.iter().enumerate() {
+        match item {
+            SceneItem::Text(line) => draw_text(
+                hdc,
+                20,
+                positions.item_y[index],
+                &line.text,
+                line.size,
+                line.color,
+            ),
+            SceneItem::Input(input) => {
+                if !state.submitted {
+                    draw_text(
+                        hdc,
+                        20,
+                        positions.prompt_y[input_index],
+                        &input.prompt,
+                        12,
+                        opposite_color(state.scene.background),
+                    );
+                }
+                input_index += 1;
+            }
+            SceneItem::Image(image) => {
+                if image.mime_type == "application/json" {
+                    let text = String::from_utf8_lossy(&image.contents);
+                    for (line_index, line) in text.lines().take(32).enumerate() {
+                        draw_text(
+                            hdc,
+                            20,
+                            positions.item_y[index] + line_index as i32 * 16,
+                            line,
+                            12,
+                            opposite_color(state.scene.background),
+                        );
+                    }
+                } else {
+                    let loaded = state.native_images.get(image_index).copied().flatten();
+                    if let Some(bitmap) = loaded {
+                        let (width, height) = display_image_size(image, loaded, state.scene.width);
+                        if !graphics.is_null() {
+                            GdipDrawImageRectI(
+                                graphics,
+                                bitmap,
+                                20,
+                                positions.item_y[index],
+                                width,
+                                height,
+                            );
+                        }
+                    } else {
+                        draw_text(
+                            hdc,
+                            20,
+                            positions.item_y[index],
+                            &format!("Could not display image: {}", image.name),
+                            12,
+                            rgb(190, 0, 0),
+                        );
+                    }
+                }
+                image_index += 1;
+            }
         }
+    }
+    if !graphics.is_null() {
+        GdipDeleteGraphics(graphics);
     }
 
     if let Some(error) = &state.error {
@@ -502,6 +727,82 @@ unsafe fn paint(window: HWND, state: &WindowState) {
     }
 
     EndPaint(window, &paint);
+}
+
+unsafe fn load_native_images(items: &[SceneItem]) -> Vec<Option<*mut GpImage>> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            SceneItem::Image(image) if image.mime_type != "application/json" => {
+                let mut bitmap: *mut GpBitmap = null_mut();
+                let path = to_wide(&image.name);
+                let status = GdipCreateBitmapFromFile(path.as_ptr(), &mut bitmap);
+                if status == 0 && !bitmap.is_null() {
+                    Some(Some(bitmap.cast::<GpImage>()))
+                } else {
+                    Some(None)
+                }
+            }
+            SceneItem::Image(_) => Some(None),
+            _ => None,
+        })
+        .collect()
+}
+
+unsafe fn dispose_native_images(images: &[Option<*mut GpImage>]) {
+    for image in images.iter().flatten() {
+        GdipDisposeImage(*image);
+    }
+}
+
+unsafe fn paint_button(draw: &DRAWITEMSTRUCT, state: &WindowState) {
+    let mut color = state.scene.submit_button.button_color;
+    if draw.itemState & ODS_SELECTED != 0 {
+        color = rgb(
+            (color & 0xff) * 4 / 5,
+            ((color >> 8) & 0xff) * 4 / 5,
+            ((color >> 16) & 0xff) * 4 / 5,
+        );
+    }
+    let brush = CreateSolidBrush(color);
+    FillRect(draw.hDC, &draw.rcItem, brush);
+    DeleteObject(brush);
+    SetBkMode(draw.hDC, TRANSPARENT as i32);
+    SetTextColor(draw.hDC, state.scene.submit_button.text_color);
+
+    let label = state
+        .button_override
+        .as_deref()
+        .unwrap_or(&state.scene.submit_button.label);
+    let wide = to_wide(label);
+    let face = to_wide("Segoe UI");
+    let font = CreateFontW(
+        -state.scene.submit_button.text_size.max(8),
+        0,
+        0,
+        0,
+        FW_NORMAL as i32,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET as u32,
+        0,
+        0,
+        DEFAULT_QUALITY as u32,
+        DEFAULT_PITCH as u32,
+        face.as_ptr(),
+    );
+    let previous = SelectObject(draw.hDC, font);
+    let mut bounds = draw.rcItem;
+    DrawTextW(
+        draw.hDC,
+        wide.as_ptr(),
+        wide.len().saturating_sub(1) as i32,
+        &mut bounds,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+    );
+    SelectObject(draw.hDC, previous);
+    DeleteObject(font);
 }
 
 unsafe fn draw_text(

@@ -1,12 +1,20 @@
-use crate::ast::{BinaryOperator, Expr, Literal, Statement, TextStyle, TypeName, UnaryOperator};
-use crate::graphics::{launch_window, InputField, TextLine, WindowHandle, WindowScene};
+use crate::ast::{
+    BinaryOperator, ButtonEvent, ButtonStyle, Expr, Literal, Statement, TextStyle, TypeName,
+    UnaryOperator,
+};
+use crate::graphics::{
+    launch_window, ButtonView, ImageAsset, InputField, SceneItem, TextLine, WindowEvent,
+    WindowHandle, WindowScene,
+};
 use crate::json;
 use crate::value::Value;
 
 use rand::Rng;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -27,12 +35,21 @@ struct WindowConfig {
     background: u32,
     drawing: Vec<DrawingItem>,
     visible: bool,
+    submit_button: Option<ButtonView>,
 }
 
 #[derive(Clone)]
 struct BoxConfig {
     width: i32,
     height: i32,
+}
+
+#[derive(Clone)]
+struct ButtonConfig {
+    label: String,
+    text_size: i32,
+    text_color: u32,
+    button_color: u32,
 }
 
 #[derive(Clone)]
@@ -47,6 +64,24 @@ enum DrawingItem {
         prompt: String,
         width: i32,
         height: i32,
+    },
+    Image {
+        path: String,
+        width: Option<i32>,
+        height: Option<i32>,
+    },
+}
+
+#[derive(Clone)]
+enum DeferredDrawing {
+    Text {
+        expression: Expr,
+        style: Option<TextStyle>,
+    },
+    Image {
+        path: String,
+        width: Option<i32>,
+        height: Option<i32>,
     },
 }
 
@@ -69,8 +104,11 @@ pub struct Runtime {
     functions: HashMap<String, Function>,
     windows: HashMap<String, WindowConfig>,
     boxes: HashMap<String, BoxConfig>,
+    buttons: HashMap<String, ButtonConfig>,
     window_handles: HashMap<String, WindowHandle>,
+    pending_button_presses: VecDeque<String>,
     drawing_into: Option<String>,
+    asset_directory: Option<PathBuf>,
 }
 
 impl Runtime {
@@ -80,8 +118,18 @@ impl Runtime {
             functions: HashMap::new(),
             windows: HashMap::new(),
             boxes: HashMap::new(),
+            buttons: HashMap::new(),
             window_handles: HashMap::new(),
+            pending_button_presses: VecDeque::new(),
             drawing_into: None,
+            asset_directory: None,
+        }
+    }
+
+    pub fn with_asset_directory(asset_directory: Option<PathBuf>) -> Self {
+        Self {
+            asset_directory,
+            ..Self::new()
         }
     }
 
@@ -137,6 +185,7 @@ impl Runtime {
                                 background: rgb(255, 255, 255),
                                 drawing: Vec::new(),
                                 visible: false,
+                                submit_button: None,
                             },
                         );
                         Value::Window
@@ -150,6 +199,18 @@ impl Runtime {
                             },
                         );
                         Value::GraphicBox
+                    }
+                    Expr::GraphicButton => {
+                        self.buttons.insert(
+                            name.clone(),
+                            ButtonConfig {
+                                label: name.clone(),
+                                text_size: 14,
+                                text_color: rgb(0, 0, 0),
+                                button_color: rgb(230, 230, 230),
+                            },
+                        );
+                        Value::Button
                     }
                     _ => self.evaluate(value)?,
                 };
@@ -299,6 +360,65 @@ impl Runtime {
                 Ok(())
             }
 
+            Statement::ShowImage {
+                path,
+                width,
+                height,
+            } => {
+                let window = self.drawing_into.clone().ok_or_else(|| RuntimeError {
+                    message: "'show' can only be used inside a 'draw inside' block".to_string(),
+                })?;
+                let dimensions = match (width, height) {
+                    (Some(width), Some(height)) => Some((
+                        self.dimension(width, "image width")?,
+                        self.dimension(height, "image height")?,
+                    )),
+                    _ => None,
+                };
+                self.windows
+                    .get_mut(&window)
+                    .ok_or_else(|| RuntimeError {
+                        message: format!("Window '{}' has not been defined", window),
+                    })?
+                    .drawing
+                    .push(DrawingItem::Image {
+                        path: path.clone(),
+                        width: dimensions.map(|value| value.0),
+                        height: dimensions.map(|value| value.1),
+                    });
+                Ok(())
+            }
+
+            Statement::SetButtonText { name, text } => {
+                if self.get_variable(name) != Some(Value::Button) {
+                    return Err(RuntimeError {
+                        message: format!("'{}' is not a button", name),
+                    }
+                    .into());
+                }
+                let label = self.evaluate(text)?.to_string();
+                self.buttons
+                    .get_mut(name)
+                    .ok_or_else(|| RuntimeError {
+                        message: format!("Button '{}' has not been defined", name),
+                    })?
+                    .label = label;
+                self.update_button_windows(name)?;
+                Ok(())
+            }
+
+            Statement::SetButtonStyle { name, style } => {
+                if self.get_variable(name) != Some(Value::Button) {
+                    return Err(RuntimeError {
+                        message: format!("'{}' is not a button", name),
+                    }
+                    .into());
+                }
+                self.apply_button_style(name, style)?;
+                self.update_button_windows(name)?;
+                Ok(())
+            }
+
             Statement::MakeWindow { name, appear } => {
                 if self.get_variable(name) != Some(Value::Window) {
                     return Err(RuntimeError {
@@ -343,11 +463,23 @@ impl Runtime {
                 input_type,
                 prompt,
                 inside,
+                button,
+                button_style,
             } => {
                 let prompt = self.evaluate(prompt)?;
 
                 if let Some(window) = self.drawing_into.clone() {
                     let prompt = prompt.to_string();
+                    let default_button_view = self.button_view(button.as_deref(), button_style)?;
+                    let button_view = if button.is_none() && *button_style == ButtonStyle::default()
+                    {
+                        self.windows
+                            .get(&window)
+                            .and_then(|config| config.submit_button.clone())
+                            .unwrap_or(default_button_view)
+                    } else {
+                        default_button_view
+                    };
                     let (width, height) = if let Some(box_name) = inside {
                         if self.get_variable(box_name) != Some(Value::GraphicBox) {
                             return Err(RuntimeError {
@@ -369,6 +501,19 @@ impl Runtime {
                     let config = self.windows.get_mut(&window).ok_or_else(|| RuntimeError {
                         message: format!("Window '{}' has not been defined", window),
                     })?;
+                    if let Some(existing) = &config.submit_button {
+                        if existing.name.is_some()
+                            && button_view.name.is_some()
+                            && existing.name != button_view.name
+                        {
+                            return Err(RuntimeError {
+                                message: "Inputs in one window must use the same submit button"
+                                    .to_string(),
+                            }
+                            .into());
+                        }
+                    }
+                    config.submit_button = Some(button_view);
                     config.drawing.push(DrawingItem::Input {
                         name: name.clone(),
                         input_type: input_type.clone(),
@@ -379,9 +524,9 @@ impl Runtime {
                     return Ok(());
                 }
 
-                if inside.is_some() {
+                if inside.is_some() || button.is_some() || *button_style != ButtonStyle::default() {
                     return Err(RuntimeError {
-                        message: "'inside' can only be used by an input drawn in a window"
+                        message: "Input boxes and buttons can only be used inside a window"
                             .to_string(),
                     }
                     .into());
@@ -414,6 +559,12 @@ impl Runtime {
                 body,
                 otherwise,
             } => {
+                if let Expr::ButtonEvent { name, event } = condition {
+                    self.wait_for_button_event(name, event)?;
+                    self.execute_statements(body)?;
+                    return Ok(());
+                }
+
                 let condition_value = self.evaluate(condition)?;
 
                 match condition_value {
@@ -531,6 +682,12 @@ impl Runtime {
             Expr::Window => Ok(Value::Window),
 
             Expr::GraphicBox => Ok(Value::GraphicBox),
+
+            Expr::GraphicButton => Ok(Value::Button),
+
+            Expr::ButtonEvent { .. } => Err(RuntimeError {
+                message: "Button events can only be used directly in a when condition".to_string(),
+            }),
 
             Expr::Variable(name) => self.get_variable(name).ok_or_else(|| RuntimeError {
                 message: format!("Variable '{}' has not been defined", name),
@@ -995,6 +1152,238 @@ impl Runtime {
         }
     }
 
+    fn button_view(
+        &mut self,
+        name: Option<&str>,
+        style: &ButtonStyle,
+    ) -> Result<ButtonView, RuntimeError> {
+        let (label, text_size, text_color, button_color) = if let Some(name) = name {
+            if self.get_variable(name) != Some(Value::Button) {
+                return Err(RuntimeError {
+                    message: format!("'{}' is not a button", name),
+                });
+            }
+            self.apply_button_style(name, style)?;
+            let button = self.buttons.get(name).ok_or_else(|| RuntimeError {
+                message: format!("Button '{}' has not been defined", name),
+            })?;
+            (
+                button.label.clone(),
+                button.text_size,
+                button.text_color,
+                button.button_color,
+            )
+        } else {
+            ("Submit".to_string(), 14, rgb(0, 0, 0), rgb(230, 230, 230))
+        };
+
+        let text_size = if let Some(size) = &style.size {
+            match self.evaluate(size)? {
+                Value::Number(value)
+                    if value.is_finite()
+                        && value.fract() == 0.0
+                        && (8.0..=96.0).contains(&value) =>
+                {
+                    value as i32
+                }
+                Value::Number(_) => {
+                    return Err(RuntimeError {
+                        message: "Button text size must be a whole number from 8 to 96".to_string(),
+                    });
+                }
+                _ => {
+                    return Err(RuntimeError {
+                        message: "Button text size must be a number".to_string(),
+                    });
+                }
+            }
+        } else {
+            text_size
+        };
+        Ok(ButtonView {
+            name: name.map(str::to_string),
+            label,
+            text_size,
+            text_color: style
+                .text_color
+                .as_deref()
+                .map(parse_color)
+                .transpose()?
+                .unwrap_or(text_color),
+            button_color: style
+                .button_color
+                .as_deref()
+                .map(parse_color)
+                .transpose()?
+                .unwrap_or(button_color),
+        })
+    }
+
+    fn apply_button_style(&mut self, name: &str, style: &ButtonStyle) -> Result<(), RuntimeError> {
+        let text_size = if let Some(size) = &style.size {
+            match self.evaluate(size)? {
+                Value::Number(value)
+                    if value.is_finite()
+                        && value.fract() == 0.0
+                        && (8.0..=96.0).contains(&value) =>
+                {
+                    Some(value as i32)
+                }
+                Value::Number(_) => {
+                    return Err(RuntimeError {
+                        message: "Button text size must be a whole number from 8 to 96".to_string(),
+                    });
+                }
+                _ => {
+                    return Err(RuntimeError {
+                        message: "Button text size must be a number".to_string(),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+        let text_color = style.text_color.as_deref().map(parse_color).transpose()?;
+        let button_color = style.button_color.as_deref().map(parse_color).transpose()?;
+        let button = self.buttons.get_mut(name).ok_or_else(|| RuntimeError {
+            message: format!("Button '{}' has not been defined", name),
+        })?;
+        if let Some(size) = text_size {
+            button.text_size = size;
+        }
+        if let Some(color) = text_color {
+            button.text_color = color;
+        }
+        if let Some(color) = button_color {
+            button.button_color = color;
+        }
+        Ok(())
+    }
+
+    fn update_button_windows(&mut self, name: &str) -> Result<(), RuntimeError> {
+        let button = self.buttons.get(name).ok_or_else(|| RuntimeError {
+            message: format!("Button '{}' has not been defined", name),
+        })?;
+        let view = ButtonView {
+            name: Some(name.to_string()),
+            label: button.label.clone(),
+            text_size: button.text_size,
+            text_color: button.text_color,
+            button_color: button.button_color,
+        };
+        let window_names = self
+            .windows
+            .iter()
+            .filter_map(|(window_name, config)| {
+                config
+                    .submit_button
+                    .as_ref()
+                    .filter(|submit| submit.name.as_deref() == Some(name))
+                    .map(|_| window_name.clone())
+            })
+            .collect::<Vec<_>>();
+        for window_name in window_names {
+            if let Some(config) = self.windows.get_mut(&window_name) {
+                config.submit_button = Some(view.clone());
+            }
+            if let Some(handle) = self.window_handles.get(&window_name) {
+                handle
+                    .update_button(view.clone())
+                    .map_err(|message| RuntimeError { message })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn wait_for_button_event(
+        &mut self,
+        name: &str,
+        expected: &ButtonEvent,
+    ) -> Result<(), RuntimeError> {
+        if self.get_variable(name) != Some(Value::Button) {
+            return Err(RuntimeError {
+                message: format!("'{}' is not a button", name),
+            });
+        }
+
+        if matches!(expected, ButtonEvent::Pressed) {
+            if let Some(index) = self
+                .pending_button_presses
+                .iter()
+                .position(|button| button == name)
+            {
+                self.pending_button_presses.remove(index);
+                return Ok(());
+            }
+        }
+
+        let window_name = self
+            .windows
+            .iter()
+            .find_map(|(window_name, config)| {
+                config
+                    .submit_button
+                    .as_ref()
+                    .filter(|button| button.name.as_deref() == Some(name))
+                    .map(|_| window_name.clone())
+            })
+            .ok_or_else(|| RuntimeError {
+                message: format!("Button '{}' is not attached to an input in a window", name),
+            })?;
+        let handle = self
+            .window_handles
+            .get_mut(&window_name)
+            .ok_or_else(|| RuntimeError {
+                message: format!("The window for button '{}' is not open", name),
+            })?;
+
+        loop {
+            match handle
+                .wait_for_event()
+                .map_err(|message| RuntimeError { message })?
+            {
+                WindowEvent::ButtonPressed(button)
+                    if button == name && matches!(expected, ButtonEvent::Pressed) =>
+                {
+                    return Ok(())
+                }
+                WindowEvent::ButtonHovered(button)
+                    if button == name && matches!(expected, ButtonEvent::Hovered) =>
+                {
+                    return Ok(())
+                }
+                WindowEvent::Closed => {
+                    return Err(RuntimeError {
+                        message: format!("The window for button '{}' was closed", name),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn load_image(
+        &self,
+        path: &str,
+        width: Option<i32>,
+        height: Option<i32>,
+    ) -> Result<ImageAsset, RuntimeError> {
+        let requested_path = Path::new(path);
+        let resolved_path = if requested_path.is_absolute() {
+            requested_path.to_path_buf()
+        } else if let Some(directory) = &self.asset_directory {
+            let beside_program = directory.join(requested_path);
+            if beside_program.exists() {
+                beside_program
+            } else {
+                requested_path.to_path_buf()
+            }
+        } else {
+            requested_path.to_path_buf()
+        };
+        load_image(&resolved_path.to_string_lossy(), width, height)
+    }
+
     fn show_window(&mut self, name: &str) -> Result<(), RuntimeError> {
         if self.window_handles.contains_key(name) {
             return Ok(());
@@ -1012,22 +1401,40 @@ impl Runtime {
             .drawing
             .iter()
             .position(|item| matches!(item, DrawingItem::Input { .. }));
-        let mut initial_text = Vec::new();
-        let mut deferred_text = Vec::new();
+        let mut initial_items = Vec::new();
+        let mut deferred_items = Vec::new();
         let mut input_definitions = Vec::new();
-        let mut input_fields = Vec::new();
 
         for (index, item) in config.drawing.iter().enumerate() {
             match item {
                 DrawingItem::Text { expression, style } => {
                     if first_input.map_or(true, |input_index| index < input_index) {
-                        initial_text.push(self.make_text_line(
+                        initial_items.push(SceneItem::Text(self.make_text_line(
                             expression,
                             style.as_ref(),
                             config.background,
-                        )?);
+                        )?));
                     } else {
-                        deferred_text.push((expression.clone(), style.clone()));
+                        deferred_items.push(DeferredDrawing::Text {
+                            expression: expression.clone(),
+                            style: style.clone(),
+                        });
+                    }
+                }
+                DrawingItem::Image {
+                    path,
+                    width,
+                    height,
+                } => {
+                    if first_input.map_or(true, |input_index| index < input_index) {
+                        initial_items
+                            .push(SceneItem::Image(self.load_image(path, *width, *height)?));
+                    } else {
+                        deferred_items.push(DeferredDrawing::Image {
+                            path: path.clone(),
+                            width: *width,
+                            height: *height,
+                        });
                     }
                 }
                 DrawingItem::Input {
@@ -1038,29 +1445,37 @@ impl Runtime {
                     height,
                 } => {
                     input_definitions.push((name.clone(), input_type.clone()));
-                    input_fields.push(InputField {
+                    initial_items.push(SceneItem::Input(InputField {
                         prompt: prompt.clone(),
                         width: *width,
                         height: *height,
-                    });
+                    }));
                 }
             }
         }
+
+        let submit_button = config.submit_button.unwrap_or(ButtonView {
+            name: None,
+            label: "Submit".to_string(),
+            text_size: 14,
+            text_color: rgb(0, 0, 0),
+            button_color: rgb(230, 230, 230),
+        });
 
         let scene = WindowScene {
             title: name.to_string(),
             width: config.width,
             height: config.height,
             background: config.background,
-            text: initial_text,
-            inputs: input_fields,
+            items: initial_items,
+            submit_button,
         };
 
-        let handle = launch_window(scene).map_err(|message| RuntimeError { message })?;
+        let mut handle = launch_window(scene).map_err(|message| RuntimeError { message })?;
 
         if !input_definitions.is_empty() {
             loop {
-                let raw_values = handle
+                let (raw_values, button_name) = handle
                     .wait_for_input()
                     .map_err(|message| RuntimeError { message })?;
                 if raw_values.len() != input_definitions.len() {
@@ -1096,17 +1511,33 @@ impl Runtime {
                     self.define_variable(variable, value);
                 }
 
-                let mut lines = Vec::with_capacity(deferred_text.len());
-                for (expression, style) in &deferred_text {
-                    lines.push(self.make_text_line(
-                        expression,
-                        style.as_ref(),
-                        config.background,
-                    )?);
+                if let Some(button) = button_name {
+                    self.pending_button_presses.push_back(button);
+                }
+
+                let mut completed_items = Vec::with_capacity(deferred_items.len());
+                for item in &deferred_items {
+                    match item {
+                        DeferredDrawing::Text { expression, style } => {
+                            completed_items.push(SceneItem::Text(self.make_text_line(
+                                expression,
+                                style.as_ref(),
+                                config.background,
+                            )?));
+                        }
+                        DeferredDrawing::Image {
+                            path,
+                            width,
+                            height,
+                        } => {
+                            completed_items
+                                .push(SceneItem::Image(self.load_image(path, *width, *height)?));
+                        }
+                    }
                 }
 
                 handle
-                    .complete_input(lines)
+                    .complete_input(completed_items)
                     .map_err(|message| RuntimeError { message })?;
                 break;
             }
@@ -1292,6 +1723,48 @@ fn parse_color(value: &str) -> Result<u32, RuntimeError> {
     })?;
 
     Ok(rgb(red, green, blue))
+}
+
+fn load_image(
+    path: &str,
+    width: Option<i32>,
+    height: Option<i32>,
+) -> Result<ImageAsset, RuntimeError> {
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mime_type = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "json" => "application/json",
+        "avif" => "image/avif",
+        "ico" => "image/x-icon",
+        "tif" | "tiff" => "image/tiff",
+        _ => {
+            return Err(RuntimeError {
+                message: format!(
+                    "Foxash cannot display '{}'; supported files include PNG, JPEG, GIF, BMP, WebP, SVG, and JSON",
+                    path
+                ),
+            });
+        }
+    };
+    let contents = fs::read(path).map_err(|error| RuntimeError {
+        message: format!("Could not show '{}': {}", path, error),
+    })?;
+    Ok(ImageAsset {
+        name: path.to_string(),
+        mime_type: mime_type.to_string(),
+        contents,
+        width,
+        height,
+    })
 }
 
 fn rgb(red: u32, green: u32, blue: u32) -> u32 {

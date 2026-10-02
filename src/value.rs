@@ -10,6 +10,7 @@ pub enum Value {
     Object(BTreeMap<String, Value>),
     Window,
     GraphicBox,
+    Button,
     Nothing,
 }
 
@@ -58,6 +59,7 @@ impl fmt::Display for Value {
 
             Value::Window => write!(formatter, "window"),
             Value::GraphicBox => write!(formatter, "box"),
+            Value::Button => write!(formatter, "button"),
 
             Value::Nothing => write!(formatter, "nothing"),
         }
