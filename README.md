@@ -35,8 +35,8 @@ For information about Foxash syntax, commands, and programming features, see the
 
 ## Roadmap
 
-- VS Code extension - V0.1.0 out now for Foxash V1.2.5 and Foxash V1.3.0!
-- Additional project graphics - Available now in Foxash V1.3.0!
+- VS Code extension - V0.2.0 out now for Foxash V1.4.0!
+- Additional project graphics - Available now in Foxash V1.3.0 and Foxsah V1.4.0!
 - Further language and tooling improvements
 
 ## Repository
