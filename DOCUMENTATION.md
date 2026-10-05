@@ -912,13 +912,7 @@ foxash version
 
 ## VS Code extension
 
-Foxash includes a VS Code extension in [`vscode-foxash`](vscode-foxash). Install the packaged extension with:
-
-```text
-code --install-extension vscode-foxash/foxash-0.2.0.vsix
-```
-or by manually installing it via vsix in VS Code's extension manager.
-
+Foxash includes a VS Code extension. Install the extension by manually installing it via vsix in VS Code's extension manager.
 The extension adds Foxash syntax highlighting, snippets, bracket matching, and **Foxash: Run File** / **Foxash: Check File** commands.  
 
 ---
